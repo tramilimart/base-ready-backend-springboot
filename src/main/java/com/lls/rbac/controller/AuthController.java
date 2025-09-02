@@ -1,5 +1,6 @@
 package com.lls.rbac.controller;
 
+import com.lls.rbac.dto.ApiResponse;
 import com.lls.rbac.dto.LoginRequestDTO;
 import com.lls.rbac.dto.RegisterRequestDTO;
 import com.lls.rbac.entity.User;
@@ -9,11 +10,13 @@ import com.lls.rbac.security.CustomUserDetailsService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.Cookie;
@@ -31,13 +34,15 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
+    private final UserDetailsService userDetailsService;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
     @Autowired
-    public AuthController(AuthenticationManager authenticationManager, UserRepository userRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
+    public AuthController(AuthenticationManager authenticationManager, UserRepository userRepository, UserDetailsService userDetailsService, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
+        this.userDetailsService = userDetailsService;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
     }
@@ -97,6 +102,42 @@ public class AuthController {
         return ResponseEntity.ok("User registered successfully");
     }
 
+    @GetMapping(path = "/validate-token")
+    public ResponseEntity<?> checkSession(HttpServletRequest request) {
+        try {
+            // Read JWT token from cookies
+            Cookie[] cookies = request.getCookies();
+            String token = null;
+
+            if (cookies != null) {
+                for (Cookie cookie : cookies) {
+                    if ("jwt-token".equals(cookie.getName())) {
+                        token = cookie.getValue();
+                        break;
+                    }
+                }
+            }
+
+            if (token != null) {
+                return ApiResponse.body()
+                        .success(true)
+                        .status(HttpStatus.OK)
+                        .build();
+            }
+            return ApiResponse.body()
+                    .success(false)
+                    .responseCode("INVALID_TOKEN")
+                    .status(HttpStatus.BAD_REQUEST)
+                    .build();
+        } catch (Exception e) {
+            return ApiResponse.body()
+                    .success(false)
+                    .responseCode("INVALID_TOKEN")
+                    .status(HttpStatus.BAD_REQUEST)
+                    .build();
+        }
+    }
+
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile(HttpServletRequest request) {
         try {
@@ -112,6 +153,8 @@ public class AuthController {
                     }
                 }
             }
+
+            logger.info("getting profile info");
             
             if (token != null) {
                 String username = jwtUtil.validateToken(token);
@@ -125,14 +168,28 @@ public class AuthController {
                         profile.put("firstName", user.getFirstName());
                         profile.put("middleName", user.getMiddleName());
                         profile.put("lastName", user.getLastName());
-                        profile.put("roles", user.getRoles());
-                        return ResponseEntity.ok(profile);
+
+                        UserDetails userAuthority = userDetailsService.loadUserByUsername(username);
+                        profile.put("authorities", userAuthority.getAuthorities());
+                        return ApiResponse.body()
+                                .success(true)
+                                .data(profile)
+                                .status(HttpStatus.OK)
+                                .build();
                     }
                 }
             }
-            return ResponseEntity.badRequest().body("Invalid token");
+            return ApiResponse.body()
+                    .success(false)
+                    .responseCode("INVALID_TOKEN")
+                    .status(HttpStatus.BAD_REQUEST)
+                    .build();
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Invalid token");
+            return ApiResponse.body()
+                    .success(false)
+                    .responseCode("INVALID_TOKEN")
+                    .status(HttpStatus.BAD_REQUEST)
+                    .build();
         }
     }
 
@@ -145,8 +202,11 @@ public class AuthController {
         jwtCookie.setPath("/");
         jwtCookie.setMaxAge(0); // Expire immediately
         response.addCookie(jwtCookie);
-        
-        return ResponseEntity.ok("Logout successful");
+
+        return ApiResponse.body()
+                .success(true)
+                .status(HttpStatus.OK)
+                .build();
     }
 
 }
